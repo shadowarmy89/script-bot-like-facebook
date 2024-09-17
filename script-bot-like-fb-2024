@@ -1,0 +1,97 @@
+function autoLikes() {
+  var accessToken = 'PASTE_YOUR_ACCESS_TOKEN_HERE';
+  var logFileName = 'likes_log.json';
+  var targetFileName = 'target.json';
+  var fbUrl = 'https://amir.web.id/fb-api/feedData.php';
+
+  var targetFile = getFileByName(targetFileName);
+  if (!targetFile) {
+    Logger.log('Target file not found: ' + targetFileName);
+    return;
+  }
+  var targetJsonContent = targetFile.getBlob().getDataAsString();
+
+  var fbResponse = UrlFetchApp.fetch(fbUrl, {
+    'method': 'post',
+    'payload': {
+      'accessToken': accessToken,
+      'targetJson': targetJsonContent
+    }
+  });
+
+  var fbData = JSON.parse(fbResponse.getContentText());
+
+  if (fbData.error) {
+    fbData.error.forEach(function (error) {
+      Logger.log("Error fetching Facebook API data\nMessage: " + error.message + "\nError Type: " + error.from.name + "\nError Code: " + error.from.id);
+    });
+  } else {
+    if (fbData.data) {
+      var log = loadLogFromDrive(logFileName);
+      fbData.data.forEach(function (post) {
+        if (!post.id) {
+          Logger.log(post.from.name + ' => No recent posts available.');
+          return;
+        }
+
+        var postId = post.id;
+        var likeId = postId.split('_')[1];
+        var fromId = post.from.id;
+        var fromName = post.from.name;
+        var message = post.message || '';
+
+        if (log[fromId] && log[fromId].indexOf(likeId) > -1) {
+          Logger.log(fromName + ' => (Already Liked)');
+          return;
+        }
+
+        try {
+          var likeResponse = UrlFetchApp.fetch('https://graph.facebook.com/' + likeId + '/likes?access_token=' + accessToken + '&method=post');
+          var likeResult = JSON.parse(likeResponse.getContentText());
+
+          if (!likeResult.error) {
+            if (!log[fromId]) {
+              log[fromId] = [];
+            }
+            log[fromId].push(likeId);
+
+            saveLogToDrive(logFileName, log);
+
+            Logger.log(fromName + ' => ' + message + '\nPost ID ' + likeId + ' (Like Success)');
+          } else {
+            Logger.log(fromName + ' => ' + message + '\nPost ID ' + likeId + ' (Like Failed)');
+          }
+        } catch (e) {
+          Logger.log(fromName + ' => ' + message + ' Like Failed, You are banned from using BOT temporarily.');
+        }
+      });
+    } else {
+      Logger.log('Failed to fetch data from: ' + fbUrl);
+    }
+  }
+}
+
+function loadLogFromDrive(logFileName) {
+  var file = getFileByName(logFileName);
+  if (file) {
+    var content = file.getBlob().getDataAsString();
+    return content ? JSON.parse(content) : {};
+  } else {
+    return {};
+  }
+}
+
+function saveLogToDrive(logFileName, log) {
+  var file = getFileByName(logFileName);
+  var content = JSON.stringify(log, null, 2);
+  if (file) {
+    file.setContent(content);
+  } else {
+    DriveApp.createFile(logFileName, content, MimeType.JSON);
+  }
+}
+
+function getFileByName(fileName) {
+  var files = DriveApp.getFilesByName(fileName);
+  return files.hasNext() ? files.next() : null;
+}
